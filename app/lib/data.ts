@@ -1,88 +1,97 @@
 import postgres from 'postgres';
 import {
+  CardData,
   CustomerField,
   CustomersTableType,
   InvoiceForm,
   InvoicesTable,
+  LatestInvoice,
   LatestInvoiceRaw,
   Revenue,
 } from './definitions';
 import { formatCurrency } from './utils';
+import { createClient } from './supabase/client';
 
-const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+const supabase = createClient();
 
-export async function fetchRevenue() {
-  try {
-    // Artificially delay a response for demo purposes.
-    // Don't do this in production :)
+export async function fetchRevenue(): Promise<Revenue[]> {
+  // Artificially delay a response for demo purposes.
+  // Don't do this in production :)
 
-    // console.log('Fetching revenue data...');
-    // await new Promise((resolve) => setTimeout(resolve, 3000));
+  // console.log('Fetching revenue data...');
+  // await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    const data = await sql<Revenue[]>`SELECT * FROM revenue`;
+  const { data, error } = await supabase.from("revenue").select("*");
 
-    // console.log('Data fetch completed after 3 seconds.');
-
-    return data;
-  } catch (error) {
+  if (error) {
     console.error('Database Error:', error);
-    throw new Error('Failed to fetch revenue data.');
+    return [];
   }
+
+  // console.log('Data fetch completed after 3 seconds.');
+  return data || [];
 }
 
-export async function fetchLatestInvoices() {
-  try {
-    const data = await sql<LatestInvoiceRaw[]>`
-      SELECT invoices.amount, customers.name, customers.image_url, customers.email, invoices.id
-      FROM invoices
-      JOIN customers ON invoices.customer_id = customers.id
-      ORDER BY invoices.date DESC
-      LIMIT 5`;
+export async function fetchLatestInvoices(): Promise<LatestInvoice[]> {
+    const { data, error } = await supabase
+      .from("invoices_with_customers")
+      .select('*')
+      .order("date", { ascending: false })
+      .limit(5);
+    
+    if (error) {
+      console.error('Database Error:', error);
+      return [];
+    }
 
     const latestInvoices = data.map((invoice) => ({
       ...invoice,
-      amount: formatCurrency(invoice.amount),
+      amount: formatCurrency(invoice.amount), // форматируем валюту
     }));
+    
     return latestInvoices;
-  } catch (error) {
-    console.error('Database Error:', error);
-    throw new Error('Failed to fetch the latest invoices.');
-  }
 }
 
-export async function fetchCardData() {
-  try {
-    // You can probably combine these into a single SQL query
-    // However, we are intentionally splitting them to demonstrate
-    // how to initialize multiple queries in parallel with JS.
-    const invoiceCountPromise = sql`SELECT COUNT(*) FROM invoices`;
-    const customerCountPromise = sql`SELECT COUNT(*) FROM customers`;
-    const invoiceStatusPromise = sql`SELECT
-         SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS "paid",
-         SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS "pending"
-         FROM invoices`;
+export async function fetchCardData(): Promise<CardData> {
+  // You can probably combine these into a single SQL query
+  // However, we are intentionally splitting them to demonstrate
+  // how to initialize multiple queries in parallel with JS.
+  const invoiceCountPromise = supabase.from("invoices").select("count");
+  const customerCountPromise = supabase.from("customers").select("*", {
+    count: "exact", // 'exact', 'planned', 'estimated'
+    head: true, // не получаем данные, только метаданные
+  });
+  const invoiceStatusPromise = supabase
+    .from("invoice_status_totals")
+    .select("*");
 
-    const data = await Promise.all([
+  const [
+      { data: invoiceData, error: invoiceError },
+      { count: customerCount, error: customerError },
+      { data: statusData, error: statusError }
+    ] = await Promise.all([
       invoiceCountPromise,
       customerCountPromise,
       invoiceStatusPromise,
     ]);
 
-    const numberOfInvoices = Number(data[0][0].count ?? '0');
-    const numberOfCustomers = Number(data[1][0].count ?? '0');
-    const totalPaidInvoices = formatCurrency(data[2][0].paid ?? '0');
-    const totalPendingInvoices = formatCurrency(data[2][0].pending ?? '0');
+    // Проверяем ошибки
+    const errors = [invoiceError, customerError, statusError].filter(Boolean);
+    if (errors.length > 0) {
+      console.error('Unexpected error in fetchCardData:', errors);
+    }
 
-    return {
-      numberOfCustomers,
-      numberOfInvoices,
-      totalPaidInvoices,
-      totalPendingInvoices,
-    };
-  } catch (error) {
-    console.error('Database Error:', error);
-    throw new Error('Failed to fetch card data.');
-  }
+  const numberOfInvoices = Number(invoiceData?.[0]?.count ?? 0);
+  const numberOfCustomers = Number(customerCount ?? 0);
+  const totalPaidInvoices = formatCurrency(statusData?.[0]?.paid ?? 0);
+  const totalPendingInvoices = formatCurrency(statusData?.[0]?.pending ?? 0);
+
+  return {
+    numberOfCustomers,
+    numberOfInvoices,
+    totalPaidInvoices,
+    totalPendingInvoices,
+  };
 }
 
 const ITEMS_PER_PAGE = 6;

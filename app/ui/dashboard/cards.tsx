@@ -36,7 +36,7 @@ export function Card({
   type,
 }: {
   title: string;
-  value: number | string;
+  value: number | string | null;
   type: 'invoices' | 'customers' | 'pending' | 'collected';
 }) {
   const Icon = iconMap[type];
@@ -51,7 +51,7 @@ export function Card({
         className={`${lusitana.className}
           truncate rounded-xl bg-white px-4 py-8 text-center text-2xl`}
       >
-        {value}
+        {value ? value : 'N/A'}
       </p>
     </div>
   );
