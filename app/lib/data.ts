@@ -1,4 +1,3 @@
-import postgres from 'postgres';
 import {
   CardData,
   CustomerField,
@@ -94,41 +93,33 @@ export async function fetchCardData(): Promise<CardData> {
   };
 }
 
-// const ITEMS_PER_PAGE = 6;
-// export async function fetchFilteredInvoices(
-//   query: string,
-//   currentPage: number,
-// ) {
-//   const offset = (currentPage - 1) * ITEMS_PER_PAGE;
+const ITEMS_PER_PAGE = 6;
+export async function fetchFilteredInvoices(
+  query: string,
+  currentPage: number,
+): Promise<InvoicesTable[]> {
+  const offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
-//   try {
-//     const invoices = await sql<InvoicesTable[]>`
-//       SELECT
-//         invoices.id,
-//         invoices.amount,
-//         invoices.date,
-//         invoices.status,
-//         customers.name,
-//         customers.email,
-//         customers.image_url
-//       FROM invoices
-//       JOIN customers ON invoices.customer_id = customers.id
-//       WHERE
-//         customers.name ILIKE ${`%${query}%`} OR
-//         customers.email ILIKE ${`%${query}%`} OR
-//         invoices.amount::text ILIKE ${`%${query}%`} OR
-//         invoices.date::text ILIKE ${`%${query}%`} OR
-//         invoices.status ILIKE ${`%${query}%`}
-//       ORDER BY invoices.date DESC
-//       LIMIT ${ITEMS_PER_PAGE} OFFSET ${offset}
-//     `;
+  const {data: invoices, error} = await supabase
+      .from("invoices_with_customers")
+      .select('*')
+      .or(
+        `customers.name.ilike.%${query}%,` +
+          `customers.email.ilike.%${query}%,` +
+          `amount.ilike.%${query}%,` +
+          `date.ilike.%${query}%,` +
+          `status.ilike.%${query}%`
+      )
+      .order("date", { ascending: false })
+      .range(offset, offset + ITEMS_PER_PAGE - 1);
 
-//     return invoices;
-//   } catch (error) {
-//     console.error('Database Error:', error);
-//     throw new Error('Failed to fetch invoices.');
-//   }
-// }
+    if (error) {
+      console.error('Database Error:', error);
+      return [];
+    }
+
+    return invoices;
+}
 
 // export async function fetchInvoicesPages(query: string) {
 //   try {
